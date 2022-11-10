@@ -30,6 +30,7 @@ async def plans_performance(input_date: str):
                 .filter(Credit.issuance_date.between(period_date, input_date))
                 .first()
             )[0]
+
         elif category.id == 4:
             sum_ = (
                 db.query(func.sum(Payment.sum))
