@@ -41,6 +41,7 @@ async def plans_performance(input_date: str):
             raise ValueError("got unsupported category")
 
         if sum_ is None:
+
             sum_ = 0
         percent_success = (sum_ / plan.sum) * 100
 
