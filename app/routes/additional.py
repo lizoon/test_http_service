@@ -1,12 +1,15 @@
+import pandas as pd
+
 from app import app, db
 from app.models.Dictionary import Dictionary
 from app.models.Plan import Plan
 from app.models.Credit import Credit
 from app.models.Payment import Payment
 
-from sqlalchemy.sql import func
+from sqlalchemy.sql import func, extract
 
 from datetime import datetime
+
 
 # additional methods
 
@@ -41,10 +44,105 @@ async def plans_performance(input_date: str):
             raise ValueError("got unsupported category")
 
         if sum_ is None:
-
             sum_ = 0
         percent_success = (sum_ / plan.sum) * 100
 
-        rsp.append([plan.period, category.name, plan.sum, sum_, f"{percent_success:.2f}"])
+        rsp.append(
+            {
+                "period": plan.period,
+                "category": category.name,
+                "sum_from_plan": plan.sum,
+                "output_sum": sum_,
+                "percent_success": f"{percent_success:.2f}",
+            }
+        )
 
     return {"message": rsp}
+
+
+@app.get("/year_performance/{year}")
+async def year_performance(year: int):
+    rsp = []
+    months = pd.date_range(start=f"{year}-01-01", end=f"{year}-12-01", freq="MS")
+    sum_of_credits_by_year = (
+        db.query(func.sum(Credit.body))
+        .filter(
+            extract('year', Credit.issuance_date) == year
+        )
+        .first()
+    )[0]
+    sum_of_payments_by_year = (
+        db.query(func.sum(Payment.sum))
+        .filter(
+            extract('year', Payment.payment_date) == year
+        ).first()
+    )[0]
+    for month in months:
+        credits_count = db.query(func.count(Credit.id)).filter(
+            extract('year', Credit.issuance_date) == month.date().year,
+            extract('month', Credit.issuance_date) == month.date().month
+        ).first()[0]
+        credits_sum_by_plan = (
+            db.query(func.sum(Plan.sum))
+            .join(Dictionary)
+            .filter(
+                Dictionary.name == 'видача',
+                extract('year', Plan.period) == month.date().year,
+                extract('month', Plan.period) == month.date().month
+            )
+            .first()
+        )[0]
+        sum_of_credits = (
+            db.query(func.sum(Credit.body))
+            .filter(
+                extract('year', Plan.period) == month.date().year,
+                extract('month', Plan.period) == month.date().month
+            )
+            .first()
+        )[0]
+        percent_credits_success = 100 * (sum_of_credits / credits_sum_by_plan)
+
+        payments_count = (
+            db.query(func.count(Payment.id))
+            .filter(
+                extract('year', Plan.period) == month.date().year,
+                extract('month', Plan.period) == month.date().month
+            )
+            .first()
+        )[0]
+        payments_sum_by_plan = (
+            db.query(func.sum(Plan.sum))
+            .join(Dictionary)
+            .filter(
+                Dictionary.name == 'збір',
+                extract('year', Plan.period) == month.date().year,
+                extract('month', Plan.period) == month.date().month
+            )
+            .first()
+        )[0]
+        sum_of_payments = (
+            db.query(func.sum(Payment.sum))
+            .filter(
+                extract('year', Plan.period) == month.date().year,
+                extract('month', Plan.period) == month.date().month
+            )
+            .first()
+        )[0]
+        percent_payments_success = 100 * (sum_of_payments / payments_sum_by_plan)
+
+        percent_credits_m_to_y = (sum_of_credits / sum_of_credits_by_year) * 100
+        percent_payments_m_to_y = (sum_of_payments / sum_of_payments_by_year) * 100
+
+        rsp.append({"period": month.date(),
+                    "credits_count": credits_count,
+                    "credits_sum_by_plan": credits_sum_by_plan,
+                    "sum_of_credits": sum_of_credits,
+                    "percent_credits_success": f"{percent_credits_success:.2f}",
+                    "payments_count": payments_count,
+                    "payments_sum_by_plan": payments_sum_by_plan,
+                    "sum_of_payments": sum_of_payments,
+                    "percent_payments_success": f"{percent_payments_success:.2f}",
+                    "percent_credits_success_month/year": f"{percent_credits_m_to_y:.2f}",
+                    "percent_payments_success_month/year": f"{percent_payments_m_to_y:.2f}"
+                    })
+    return rsp

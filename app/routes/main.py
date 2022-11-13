@@ -1,4 +1,7 @@
-from app import app, db
+import pandas as pd
+
+import io
+from app import app, db, File, UploadFile
 from app.models.Plan import Plan
 from app.models.Dictionary import Dictionary
 from app.models.Credit import Credit
@@ -8,7 +11,6 @@ from sqlalchemy.sql import func
 
 from datetime import datetime
 
-import pandas as pd
 
 # main methods
 
@@ -65,16 +67,16 @@ async def user_credits(user_id: int):
                 )
 
                 resp.append(
-                    [
-                        issuance_date,
-                        is_closed,
-                        return_date,
-                        days_late,
-                        body,
-                        percent,
-                        sum_by_body,
-                        sum_by_percent,
-                    ]
+                    {
+                        "issuance_date": issuance_date,
+                        "is_closed": is_closed,
+                        "return_date": return_date,
+                        "days_late": days_late,
+                        "body": body,
+                        "percent": percent,
+                        "sum_by_body": sum_by_body,
+                        "sum_by_percent": sum_by_percent,
+                    }
                 )
 
         return {"response": resp}
@@ -82,46 +84,70 @@ async def user_credits(user_id: int):
         print(e)
 
 
-@app.get("/plans_insert/{file_name}")
-async def plans_insert(file_name):
+@app.get("/plans_insert")
+async def plans_insert(file: UploadFile = File()):
     rsp = []
     try:
-        try:
-            df = pd.read_csv(file_name)
-        except Exception:
-            file_name = "test.xlsx"
-            df = pd.read_csv(file_name)
-
+        f = io.BytesIO(
+            await file.read(),
+        )
+        df = pd.read_table(f)
         for k, d in df.items():
-            for i in range(len(d)):
-                row = d[0].split(",")
-                if (
+            for i in d:
+                _row = i.split(",")
+                row = {
+                    "period": datetime.strptime(_row[0], "%d.%m.%Y").date(),
+                    "name": _row[1],
+                    "sum": int(_row[2]),
+                }
+
+                if db.query(
                     db.query(Plan)
                     .join(Dictionary)
-                    .filter(Plan.period == row[0])
-                    .filter(Dictionary.name == row[1])
+                    .filter(Plan.period == row["period"])
+                    .filter(Dictionary.name == row["name"])
                     .exists()
-                ) is not None:
-                    rsp.append({"message": "plan already exist"})
-                elif row[0][:2] != "01":
-                    rsp.append({"message": "wrong period format"})
-                elif row[2] is None:
-                    rsp.append({"message": "sum is null"})
+                ).scalar():
+                    rsp.append(
+                        {
+                            "row": row,
+                            "status": "error",
+                            "message": "plan already exist",
+                        }
+                    )
+                elif row["period"].day != 1:
+                    rsp.append(
+                        {
+                            "row": row,
+                            "status": "error",
+                            "message": "wrong period format",
+                        }
+                    )
+                elif not row["sum"]:
+                    rsp.append(
+                        {"row": row, "status": "error", "message": "sum is null"}
+                    )
                 else:
                     category_id = (
                         db.query(Dictionary.id)
-                        .filter(row[1] == Dictionary.name)
+                        .filter(row["name"] == Dictionary.name)
                         .first()
                     )
-                    id = db.query(Plan.id).order_by(Plan.id.desc()).first()[0] + 1
                     plan = Plan(
-                        id=id, period=row[0], sum=row[2], category_id=category_id[0]
+                        period=row["period"], sum=row["sum"], category_id=category_id[0]
                     )
                     db.add(plan)
                     db.commit()
-                    rsp.append({"message": "ok! added"})
+                    rsp.append(
+                        {
+                            "row": row,
+                            "id": plan.id,
+                            "status": "success",
+                            "message": "row added",
+                        }
+                    )
 
     except Exception as e:
-        rsp.append({"message": f"error {e}"})
+        rsp.append({"status": "error", "message": "technical issues"})
         db.rollback()
     return rsp

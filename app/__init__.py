@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 
 from sqlalchemy import Column, Date, Float, ForeignKey, String, Integer, text
 from sqlalchemy.orm import relationship
@@ -7,7 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
-url = "databse_adress"
+url = "database_url"
 
 engine = create_engine(url)
 Base = declarative_base()
