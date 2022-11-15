@@ -8,14 +8,14 @@ from app.models.Payment import Payment
 
 from sqlalchemy.sql import func, extract
 
-from datetime import datetime
+import datetime
+from dateutil import parser
 
 
 @app.get("/plans_performance/{input_date}")
 async def plans_performance(input_date: str):
-    period = input_date.replace(input_date[:2], "01", 1)
-    period_date = datetime.strptime(period, "%d.%m.%Y").date()
-    input_date = datetime.strptime(input_date, "%d.%m.%Y").date()
+    input_date = parser.parse(input_date).date()
+    period_date = datetime.date(year=input_date.year, month=input_date.month, day=1)
 
     plans = db.query(Plan).filter(Plan.period == period_date).all()
 
@@ -56,62 +56,56 @@ async def plans_performance(input_date: str):
                 }
             )
         except ValueError as err:
-            rsp.append(
-                {
-                    "message": f"{err}",
-                    "status": "error"
-                }
-            )
+            rsp.append({"message": f"{err}", "status": "error"})
 
     if not rsp:
-        return {"response": rsp,
-                "status": "error",
-                "message": "plan doesn't exist"}
-    return {"response": rsp,
-            "status": "ok"}
+        return {"response": rsp, "status": "error", "message": "plan doesn't exist"}
+    return {"response": rsp, "status": "ok"}
 
 
 @app.get("/year_performance/{year}")
 async def year_performance(year: int):
     rsp = []
+
     months = pd.date_range(start=f"{year}-01-01", end=f"{year}-12-01", freq="MS")
 
     sum_of_credits_by_year = (
         db.query(func.sum(Credit.body))
-        .filter(
-            extract('year', Credit.issuance_date) == year
-        )
+        .filter(extract("year", Credit.issuance_date) == year)
         .first()
     )[0]
     sum_of_payments_by_year = (
         db.query(func.sum(Payment.sum))
-        .filter(
-            extract('year', Payment.payment_date) == year
-        ).first()
+        .filter(extract("year", Payment.payment_date) == year)
+        .first()
     )[0]
 
     for month in months:
         try:
-            credits_count = db.query(func.count(Credit.id)).filter(
-                extract('year', Credit.issuance_date) == month.date().year,
-                extract('month', Credit.issuance_date) == month.date().month
-            ).first()[0]
+            credits_count = (
+                db.query(func.count(Credit.id))
+                .filter(
+                    extract("year", Credit.issuance_date) == month.date().year,
+                    extract("month", Credit.issuance_date) == month.date().month,
+                )
+                .first()[0]
+            )
 
             credits_sum_by_plan = (
                 db.query(func.sum(Plan.sum))
                 .join(Dictionary)
                 .filter(
-                    Dictionary.name == 'видача',
-                    extract('year', Plan.period) == month.date().year,
-                    extract('month', Plan.period) == month.date().month
+                    Dictionary.name == "видача",
+                    extract("year", Plan.period) == month.date().year,
+                    extract("month", Plan.period) == month.date().month,
                 )
                 .first()
             )[0]
             sum_of_credits = (
                 db.query(func.sum(Credit.body))
                 .filter(
-                    extract('year', Credit.issuance_date) == month.date().year,
-                    extract('month', Credit.issuance_date) == month.date().month
+                    extract("year", Credit.issuance_date) == month.date().year,
+                    extract("month", Credit.issuance_date) == month.date().month,
                 )
                 .first()
             )[0]
@@ -120,8 +114,8 @@ async def year_performance(year: int):
             payments_count = (
                 db.query(func.count(Payment.id))
                 .filter(
-                    extract('year', Payment.payment_date) == month.date().year,
-                    extract('month', Payment.payment_date) == month.date().month
+                    extract("year", Payment.payment_date) == month.date().year,
+                    extract("month", Payment.payment_date) == month.date().month,
                 )
                 .first()
             )[0]
@@ -129,17 +123,17 @@ async def year_performance(year: int):
                 db.query(func.sum(Plan.sum))
                 .join(Dictionary)
                 .filter(
-                    Dictionary.name == 'збір',
-                    extract('year', Plan.period) == month.date().year,
-                    extract('month', Plan.period) == month.date().month
+                    Dictionary.name == "збір",
+                    extract("year", Plan.period) == month.date().year,
+                    extract("month", Plan.period) == month.date().month,
                 )
                 .first()
             )[0]
             sum_of_payments = (
                 db.query(func.sum(Payment.sum))
                 .filter(
-                    extract('year', Payment.payment_date) == month.date().year,
-                    extract('month', Payment.payment_date) == month.date().month
+                    extract("year", Payment.payment_date) == month.date().year,
+                    extract("month", Payment.payment_date) == month.date().month,
                 )
                 .first()
             )[0]
@@ -148,22 +142,30 @@ async def year_performance(year: int):
             percent_credits_m_to_y = (sum_of_credits / sum_of_credits_by_year) * 100
             percent_payments_m_to_y = (sum_of_payments / sum_of_payments_by_year) * 100
 
-            rsp.append({"response": {"period": month.date(),
-                                     "credits_count": credits_count,
-                                     "credits_sum_by_plan": credits_sum_by_plan,
-                                     "sum_of_credits": sum_of_credits,
-                                     "percent_credits_success": f"{percent_credits_success:.2f}",
-                                     "payments_count": payments_count,
-                                     "payments_sum_by_plan": payments_sum_by_plan,
-                                     "sum_of_payments": sum_of_payments,
-                                     "percent_payments_success": f"{percent_payments_success:.2f}",
-                                     "percent_credits_success_month_year": f"{percent_credits_m_to_y:.2f}",
-                                     "percent_payments_success_month_year": f"{percent_payments_m_to_y:.2f}"
-                                     },
-                        "status": "ok"
-                        })
-        except:
-            rsp.append({"response": {"period": month.date()},
-                        "status": "error",
-                        "message": "no such month"})
+            rsp.append(
+                {
+                    "response": {
+                        "period": month.date(),
+                        "credits_count": credits_count,
+                        "credits_sum_by_plan": credits_sum_by_plan,
+                        "sum_of_credits": sum_of_credits,
+                        "percent_credits_success": f"{percent_credits_success:.2f}",
+                        "payments_count": payments_count,
+                        "payments_sum_by_plan": payments_sum_by_plan,
+                        "sum_of_payments": sum_of_payments,
+                        "percent_payments_success": f"{percent_payments_success:.2f}",
+                        "percent_credits_success_month_year": f"{percent_credits_m_to_y:.2f}",
+                        "percent_payments_success_month_year": f"{percent_payments_m_to_y:.2f}",
+                    },
+                    "status": "ok",
+                }
+            )
+        except Exception:
+            rsp.append(
+                {
+                    "response": {"period": month.date()},
+                    "status": "error",
+                    "message": "no such month",
+                }
+            )
     return rsp

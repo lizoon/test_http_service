@@ -1,3 +1,5 @@
+import traceback
+
 import pandas as pd
 
 import io
@@ -35,12 +37,14 @@ async def user_credits(user_id: int):
             )
 
             resp.append(
-                {"issuance_date": issuance_date,
-                 "is_closed": is_closed,
-                 "return_date": actual_return_date,
-                 "days_late": body,
-                 "percent": percent,
-                 "sum_by_body": sum}
+                {
+                    "issuance_date": issuance_date,
+                    "is_closed": is_closed,
+                    "return_date": actual_return_date,
+                    "days_late": body,
+                    "percent": percent,
+                    "sum_by_body": sum,
+                }
             )
         else:
             return_date = cred.return_date
@@ -81,11 +85,8 @@ async def user_credits(user_id: int):
             )
 
     if not resp:
-        return {"response": resp,
-                "status": "error",
-                "message": "no user"}
-    return {"response": resp,
-            "status": "ok"}
+        return {"response": resp, "status": "error", "message": "no user"}
+    return {"response": resp, "status": "ok"}
 
 
 @app.post("/plans_insert/")
@@ -96,57 +97,61 @@ async def plans_insert(file: UploadFile = File()):
 
     for idx, row_ in df.iterrows():
         row = row_.to_dict()
-        row["period"] = row["period"].date()
+        try:
+            if isinstance(row["period"], str):
+                row["period"] = datetime.strptime(row["period"], "%d.%m.%Y")
+            row["period"] = row["period"].date()
 
-        if db.query(
-            db.query(Plan)
-            .join(Dictionary)
-            .filter(Plan.period == row["period"])
-            .filter(Dictionary.name == row["name"])
-            .exists()
-        ).scalar():
+            if db.query(
+                db.query(Plan)
+                .join(Dictionary)
+                .filter(Plan.period == row["period"])
+                .filter(Dictionary.name == row["name"])
+                .exists()
+            ).scalar():
+                rsp.append(
+                    {
+                        "row": row,
+                        "status": "error",
+                        "message": "plan already exist",
+                    }
+                )
+            elif row["period"].day != 1:
+                rsp.append(
+                    {
+                        "row": row,
+                        "status": "error",
+                        "message": "wrong period format",
+                    }
+                )
+            elif not row["sum"]:
+                rsp.append({"row": row, "status": "error", "message": "sum is null"})
+            else:
+                category_id = (
+                    db.query(Dictionary.id)
+                    .filter(row["name"] == Dictionary.name)
+                    .first()
+                )
+                plan = Plan(
+                    period=row["period"], sum=row["sum"], category_id=category_id[0]
+                )
+                db.add(plan)
+                db.commit()
+                rsp.append(
+                    {
+                        "row": row,
+                        "id": plan.id,
+                        "status": "success",
+                        "message": "row added",
+                    }
+                )
+        except Exception as e:
+            traceback.print_exc()
             rsp.append(
                 {
                     "row": row,
                     "status": "error",
-                    "message": "plan already exist",
+                    "message": "internal error",
                 }
             )
-        elif row["period"].day != 1:
-            rsp.append(
-                {
-                    "row": row,
-                    "status": "error",
-                    "message": "wrong period format",
-                }
-            )
-        elif not row["sum"]:
-            rsp.append(
-                {"row": row,
-                 "status": "error",
-                 "message": "sum is null"}
-            )
-        else:
-            category_id = (
-                db.query(Dictionary.id)
-                .filter(row["name"] == Dictionary.name)
-                .first()
-            )
-            plan = Plan(
-                period=row["period"], sum=row["sum"], category_id=category_id[0]
-            )
-            db.add(plan)
-            db.commit()
-            rsp.append(
-                {
-                    "row": row,
-                    "id": plan.id,
-                    "status": "success",
-                    "message": "row added",
-                }
-            )
-    #
-    # except:
-    #     rsp.append({"status": "error", "message": "technical issues"})
-    #     db.rollback()
     return rsp

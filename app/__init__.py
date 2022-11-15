@@ -7,6 +7,7 @@ from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 
+url = "database_url"
 
 engine = create_engine(url)
 Base = declarative_base()
